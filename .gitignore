@@ -1,0 +1,8 @@
+*.Rhistory
+*.igv
+*.seg
+bigWigAverageOverBed
+*.txt
+*.bed
+*.RData
+*.bigWig
