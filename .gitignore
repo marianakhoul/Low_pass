@@ -6,3 +6,4 @@ bigWigAverageOverBed
 *.bed
 *.RData
 *.bigWig
+igv_session.xml

@@ -14,6 +14,7 @@ library(BSgenome)
 library(BSgenome.Hsapiens.UCSC.hg19)
 library(future)
 library(dplyr)
+options(scipen=999)
 setwd("F:/DFCI/Low_pass/")
 
 exportSEG <- function(obj, fnames=NULL) {
@@ -150,38 +151,45 @@ plotAll(filteredReads500, title = title)
 egfrStart <- 55086725
 egfrEnd   <- 55275031
 
-readOverlap <- function(readcounts, chrom, start, end) {
-  # returns if the bins on chrom between start and end
-  df <- readcounts@featureData@data
+segOverlap <- function(segmented, chrom, start, end) {
+  # returns if the segs on chrom between start and end
   positions <- which(
-    ((df$start >= start & # does the start fall within region?
-        df$start <= end) |
-        (df$end >= start & # or, does end fall within region?
-           df$end <= end)) & # and, are those positions in chrom?
-      df$chromosome == chrom)
+    ((segmented$START >= start & # does the start fall within region?
+        segmented$START <= end) |
+        (segmented$STOP >= start & # or, does end fall within region?
+           segmented$STOP <= end)) & # and, are those positions in chrom?
+      segmented$CHROMOSOME == chrom)
   # if nothing is smaller than start + end, find the bin that captures
   # both
   if (length(positions) == 0) {
-    positions <- which(df$start <= start & 
-                         df$end >= end &
-                         df$chromosome == chrom)
+    positions <- which(segmented$START <= start & 
+                         segmented$STOP >= end &
+                         segmented$CHROMOSOME == chrom)
   }
   return(positions)
 }
 
-readOverlap(readcounts50, 7, egfrStart, egfrEnd)
-
 #### substitution ####
-smallSegs <- filteredReads50$copyNumbersCalled
-largeSegs <- filteredReads500$copyNumbersCalled
+# NOTE: only works for singular segment replacements?
+seg500 <- read.table("500_kbp_14.segments.seg", header = T)
+seg50  <- read.table("50_kbp_14.segments.seg", header = T)
 
-largePos <- readOverlap(largeSegs, 7, egfrStart, egfrEnd)
-largeStart <- largeSegs@featureData@data$start[largePos]
-largeEnd <- largeSegs@featureData@data$end[largePos]
+smallPos <- segOverlap(seg50, 7, egfrStart, egfrEnd)
+largePos <- segOverlap(seg500, 7, egfrStart, egfrEnd)
 
-smallPos <- readOverlap(smallSegs, 7, largeStart, largeEnd)
+smallSpan <- c(seg50$START[smallPos], seg50$STOP[smallPos])
 
+insertFrame <- rbind(seg500[largePos,], seg500[largePos,])
 
+insertFrame$STOP[1] <- (smallSpan[1]-1)
+insertFrame$START[2] <- (smallSpan[2]+1)
 
+segOut <- rbind(seg500[1:(largePos-1),],
+      rbind(insertFrame[1,], seg50[smallPos,], insertFrame[2,]),
+      seg500[(largePos+1):nrow(seg500),])
 
+write.table(segOut, file = "500_insert50.seg", quote = F, row.names = F,
+            sep = "\t")
 
+## sub igv bins ##
+head(read.table("500_kbp_14.segments.igv", header = T))
