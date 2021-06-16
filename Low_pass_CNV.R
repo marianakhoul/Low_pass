@@ -1,11 +1,11 @@
 #if (!requireNamespace("BiocManager", quietly = TRUE))
 #  install.packages("BiocManager")
-
+# 
 # BiocManager::install("QDNAseq", force = T)
 # BiocManager::install("QDNAseq.hg19", force = T)
-# BiocManager::install("BSgenome")
+# BiocManager::install("BSgenome", force = T)
 # BiocManager::install("Biobase", force = T)
-# BiocManager::install("BSgenome.Hsapiens.UCSC.hg19")
+# BiocManager::install("BSgenome.Hsapiens.UCSC.hg19", force = T)
 
 library(QDNAseq)
 library(QDNAseq.hg19)
@@ -187,9 +187,43 @@ insertFrame$START[2] <- (smallSpan[2]+1)
 segOut <- rbind(seg500[1:(largePos-1),],
       rbind(insertFrame[1,], seg50[smallPos,], insertFrame[2,]),
       seg500[(largePos+1):nrow(seg500),])
+segOut[,1] <- rep("500+50kbp_hybrid", dim(segOut)[1])
 
 write.table(segOut, file = "500_insert50.seg", quote = F, row.names = F,
             sep = "\t")
 
 ## sub igv bins ##
-head(read.table("500_kbp_14.segments.igv", header = T))
+igvSegs500 <- read.table("copyNumbers.500_kbp_14.igv", header = T)
+igvSegs50 <- read.table("copyNumbers.50_kbp_14.igv", header = T)
+
+binOverlap <- function(bins, chrom, start, end) {
+  # same as above but the names are different
+  positions <- which(
+    ((bins$start >= start & 
+        bins$start <= end) |
+       (bins$end >= start & 
+          bins$end <= end)) & 
+      bins$chromosome == chrom)
+  if (length(positions) == 0) {
+    positions <- which(bins$start <= start & 
+                         bins$end >= end &
+                         bins$chromosome == chrom)
+  }
+  return(positions)
+}
+
+largePos <- binOverlap(igvSegs500, 7, egfrStart, egfrEnd)
+smallPos <- binOverlap(igvSegs50, 7, igvSegs500$start[largePos], 
+                       igvSegs500$end[largePos])
+
+outbins <- rbind(igvSegs500[1:(largePos-1),],
+                 igvSegs50[smallPos,],
+                 igvSegs500[(largePos+1):nrow(igvSegs500),])
+
+write.table(outbins, file = "500_insert50.CN.igv", quote = F, 
+            row.names = F, sep = "\t")
+
+
+
+
+
