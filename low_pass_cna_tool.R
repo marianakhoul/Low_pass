@@ -1,5 +1,8 @@
 #!/usr/bin/env Rscript
 
+# Author: Taylor Falk, taylora_falk@dfci.harvard.edu
+# https://github.com/taytayp/Low_pass
+
 suppressPackageStartupMessages(require(optparse))
 current_time <- format(Sys.time(), "%y-%m-%d_%H:%M")
 validBins <- c(1, 5, 10, 15, 30, 50, 100, 500, 1000)
@@ -205,6 +208,7 @@ plotAll <- function(QDNAseqObj, title) {
 }
 
 # small bins first, takes longer
+print("##### Creating small bins #####")
 smtitle <- sprintf("%ikbp_%s", opt$smallbins, opt$out)
 smallRC <- binsAndReads(opt$smallbins, opt$bamfile, opt$threads) 
 filteredSmallRC <- filterAndBin(smallRC, opt$threads)
@@ -212,9 +216,9 @@ smallNames <- exportFiles(filteredSmallRC, name = smtitle)
 if (opt$saveplots) {
   plotAll(filteredSmallRC, title = smtitle)
 }
-print(smallNames)
 
 # then create the large bin files
+print("##### Creating large bins #####")
 lgtitle <- sprintf("%ikbp_%s", opt$largebins, opt$out)
 largeRC <- binsAndReads(opt$largebins, opt$bamfile, opt$threads) 
 filteredLargeRC <- filterAndBin(largeRC, opt$threads)
@@ -227,6 +231,7 @@ if (opt$saveplots) {
 findOverlap <- function(segmented, chrom, start, end) {
   if (length(names(segmented)) == 5) { # change col headers to match
     names(segmented)[2:3] <- c("START", "STOP")
+    names(segmented)[1] <- "CHROMOSOME"
   }
   # returns if the segs on chrom between start and end
   positions <- which(
@@ -246,10 +251,10 @@ findOverlap <- function(segmented, chrom, start, end) {
 }
 
 # combine segments
-# largeNames <- list(seg = "testing/1000kbp_test1.SEG.seg")
-# smallNames <- list(seg = "testing/50kbp_test1.SEG.seg")
-# opt <- list(chromosome = 7, start = 55086725, end = 55275031)
-#
+# largeNames <- list(seg = "testing/500kbp_test2.SEG.seg")
+# smallNames <- list(seg = "testing/50kbp_test2.SEG.seg")
+# opt <- list(chromosome = 2, start = 16078672, end = 16089125)
+
 largeSegs <- read.table(largeNames$seg, header = T)
 smallSegs <- read.table(smallNames$seg, header = T)
 
@@ -258,7 +263,7 @@ largePos <- findOverlap(largeSegs, opt$chromosome, opt$start, opt$end)
 smallPos <- findOverlap(smallSegs, opt$chromosome, opt$start, opt$end)
 
 # find the start and stop of the small segment 
-smallSpan <- c(smallSegs$START[smallPos], smallSegs$STOP[smallPos])
+smallSpan <- c(min(smallSegs$START[smallPos]), max(smallSegs$STOP[smallPos]))
 # the data.frame we will modify and reinsert
 insertFrame <- rbind(largeSegs[largePos,], largeSegs[largePos,])
 insertFrame$STOP[1] <- (smallSpan[1]-1) # truncate large segment lengths
@@ -278,18 +283,28 @@ write.table(segOut,
             quote = F, row.names = F, sep = "\t")
 
 ## sub igv bins ##
-# igvSegs500 <- read.table("copyNumbers.500_kbp_14.igv", header = T)
-# igvSegs50 <- read.table("copyNumbers.50_kbp_14.igv", header = T)
-# 
-# 
-# largePos <- binOverlap(igvSegs500, 7, egfrStart, egfrEnd)
-# smallPos <- binOverlap(igvSegs50, 7, igvSegs500$start[largePos], 
-#                        igvSegs500$end[largePos])
-# 
-# outbins <- rbind(igvSegs500[1:(largePos-1),],
-#                  igvSegs50[smallPos,],
-#                  igvSegs500[(largePos+1):nrow(igvSegs500),])
-# 
-# write.table(outbins, file = "500_insert50.CN.igv", quote = F, 
-#             row.names = F, sep = "\t")
-# 
+largeNames <- list(copynum = "testing/500kbp_test2.CN.igv")
+smallNames <- list(copynum = "testing/50kbp_test2.CN.igv")
+opt <- list(chromosome = 2, start = 16078672, end = 16089125)
+
+largeCN <- read.table(largeNames$copynum, header = T)
+smallCN <- read.table(smallNames$copynum, header = T)
+
+largePos <- findOverlap(largeCN, opt$chromosome, opt$start, opt$end)
+if (length(largePos) == 0) {
+  stop(sprtinf(paste0("ERROR: No bins were found in the copy number ",
+                      "file %s at the area specified, are you sure ",
+                      "you have the right chromosome and positions?"), 
+               largeNames$copynum))
+}
+smallPos <- findOverlap(smallCN, opt$chromosome, min(largeCN$start[largePos]),
+                        max(largeCN$end[largePos]))
+
+outbins <- rbind(largeCN[1:(min(largePos)-1),],
+                 smallCN[smallPos,],
+                 largeCN[(max(largePos)+1):nrow(largeCN),])
+
+write.table(outbins, 
+            file = sprintf("%ikbp_insert%ikbp_CN_%s.igv", opt$largebins, 
+                           opt$smallbins, opt$out), 
+            quote = F, row.names = F, sep = "\t")
