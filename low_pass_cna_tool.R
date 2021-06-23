@@ -39,7 +39,6 @@ option_list = list(
 
 opt_parser = OptionParser(option_list=option_list)
 opt = parse_args(opt_parser)
-print(opt)
 
 # catch some issues #
 if (opt$largebins %% opt$smallbins != 0) {
@@ -63,6 +62,25 @@ for (mandatoryOption in c("bamfile", "chromosome", "start", "end")) {
   }
 }
 
+# extend positions
+## since we want to compare our area of interest to the surrounding 
+## cn distribution, we extend the bin replacement up and downstream by
+## the length of the input start - stop
+posSpan <- opt$end - opt$start
+fullStart <- opt$start - posSpan
+fullStop <- opt$end + posSpan
+
+# detail inputs
+cat(sprintf(paste0("Combing QDNAseq outputs for %s.\n",
+                   "Replacing bins and segments in chromosome %i %i-%i\n",
+                   "comparing surrounding regions to %i-%i",
+                   "\nLarge bin size: %i, Small bin size: %i\n",
+                   "Running on %i thread(s), custom segmenting function: %s\n",
+                   "Files saved with tag %s\n"),
+            opt$bamfile, opt$chromosome, fullStart, fullStop, opt$start, 
+            opt$end, opt$largebins, opt$smallbins, opt$threads, 
+            opt$zerosegments, opt$out))
+
 # load noisy packages quietly
 suppressPackageStartupMessages(require(Biobase))
 suppressPackageStartupMessages(require(BSgenome))
@@ -71,12 +89,13 @@ suppressPackageStartupMessages(require(dplyr))
 suppressPackageStartupMessages(require(future))
 suppressPackageStartupMessages(require(QDNAseq))
 suppressPackageStartupMessages(require(QDNAseq.hg19))
+suppressPackageStartupMessages(require(ggplot2))
 options(scipen=999999999)
 
 # load custom segments function if flagged
 if (opt$zerosegments) {
   exportSEG <- function(obj, fnames=NULL) {
-    print("Overwriting segment calling function.")
+    cat("Overwriting segment calling function.")
     
     calls <- assayDataElement(obj, "calls")
     # segments <- log2adhoc(assayDataElement(obj, "segmented"))
@@ -208,7 +227,7 @@ plotAll <- function(QDNAseqObj, title) {
 }
 
 # small bins first, takes longer
-print("##### Creating small bins #####")
+cat("\n##### Creating small bins and segments #####\n")
 smtitle <- sprintf("%ikbp_%s", opt$smallbins, opt$out)
 smallRC <- binsAndReads(opt$smallbins, opt$bamfile, opt$threads) 
 filteredSmallRC <- filterAndBin(smallRC, opt$threads)
@@ -218,7 +237,7 @@ if (opt$saveplots) {
 }
 
 # then create the large bin files
-print("##### Creating large bins #####")
+cat("\n##### Creating large bins and segments #####\n")
 lgtitle <- sprintf("%ikbp_%s", opt$largebins, opt$out)
 largeRC <- binsAndReads(opt$largebins, opt$bamfile, opt$threads) 
 filteredLargeRC <- filterAndBin(largeRC, opt$threads)
@@ -251,16 +270,18 @@ findOverlap <- function(segmented, chrom, start, end) {
 }
 
 # combine segments
-# largeNames <- list(seg = "testing/500kbp_test2.SEG.seg")
-# smallNames <- list(seg = "testing/50kbp_test2.SEG.seg")
-# opt <- list(chromosome = 2, start = 16078672, end = 16089125)
+if (F) {
+  largeNames <- list(seg = "testing/500kbp_test2.SEG.seg")
+  smallNames <- list(seg = "testing/50kbp_test2.SEG.seg")
+  opt <- list(chromosome = 2, start = 16078672, end = 16089125)
+}
 
 largeSegs <- read.table(largeNames$seg, header = T)
 smallSegs <- read.table(smallNames$seg, header = T)
 
 # record the positions that overlap the region of interest
-largePos <- findOverlap(largeSegs, opt$chromosome, opt$start, opt$end)
-smallPos <- findOverlap(smallSegs, opt$chromosome, opt$start, opt$end)
+largePos <- findOverlap(largeSegs, opt$chromosome, fullStart, fullStop)
+smallPos <- findOverlap(smallSegs, opt$chromosome, fullStart, fullStop)
 
 # find the start and stop of the small segment 
 smallSpan <- c(min(smallSegs$START[smallPos]), max(smallSegs$STOP[smallPos]))
@@ -283,16 +304,45 @@ write.table(segOut,
             quote = F, row.names = F, sep = "\t")
 
 ## sub igv bins ##
-largeNames <- list(copynum = "testing/500kbp_test2.CN.igv")
-smallNames <- list(copynum = "testing/50kbp_test2.CN.igv")
-opt <- list(chromosome = 2, start = 16078672, end = 16089125)
+if (F) {
+  largeNames <- list(copynum = "testing/1000kbp_KHC-10-egfr.CN.igv")
+  smallNames <- list(copynum = "testing/50kbp_KHC-10-egfr.CN.igv")
+  opt <- list(chromosome = 7, start = 54600000, end = 55550000) 
+  posSpan <- opt$end - opt$start
+  fullStart <- opt$start - posSpan
+  fullStop <- opt$end + posSpan
+}
 
 largeCN <- read.table(largeNames$copynum, header = T)
 smallCN <- read.table(smallNames$copynum, header = T)
 
-largePos <- findOverlap(largeCN, opt$chromosome, opt$start, opt$end)
+largePos <- findOverlap(largeCN, opt$chromosome, fullStart, fullStop)
+# remove bins that don't have 10%? covered by the position of interest
+
+smallOverlaps <- function(binTup, posTup) {
+  # determines the percentage of overlap for a bin with position
+  # "tuple"  means just c(1, 1), i know, i know
+  if (binTup[2] >= posTup[1] & binTup[2] < posTup[2]) {
+    return((binTup[2] - posTup[1])/(binTup[2]-binTup[1]))
+  }
+  else if (binTup[1] <= posTup[2] & binTup[2] > posTup[2]) {
+    return((binTup[1] - posTup[2])/(binTup[2] - binTup[1]))
+  }
+  else {
+    return(NA) # bin does not partially overlap
+  }
+}
+
+for (i in largePos) {
+  percentCovered <- (smallOverlaps(c(largeCN$start[i], largeCN$end[i]),
+                                   c(fullStart, fullStop)))
+  if (percentCovered < 0.1) {
+    largePos <- largePos[-which(largePos == i)]
+  }
+}
+
 if (length(largePos) == 0) {
-  stop(sprtinf(paste0("ERROR: No bins were found in the copy number ",
+  stop(sprintf(paste0("ERROR: No bins were found in the copy number ",
                       "file %s at the area specified, are you sure ",
                       "you have the right chromosome and positions?"), 
                largeNames$copynum))
@@ -304,7 +354,67 @@ outbins <- rbind(largeCN[1:(min(largePos)-1),],
                  smallCN[smallPos,],
                  largeCN[(max(largePos)+1):nrow(largeCN),])
 
-write.table(outbins, 
-            file = sprintf("%ikbp_insert%ikbp_CN_%s.igv", opt$largebins, 
-                           opt$smallbins, opt$out), 
+igvOutFile <- sprintf("%ikbp_insert%ikbp_CN_%s.igv", opt$largebins, 
+                      opt$smallbins, opt$out)
+write.table(outbins, file = igvOutFile, 
             quote = F, row.names = F, sep = "\t")
+
+igvTemp <- readLines(igvOutFile)
+write(c("#type=COPY_NUMBER", "#track coords=1", igvTemp),
+      file = igvOutFile)
+
+# statistics
+# TODO: check read counts?
+labels <- c(rep("upstream", length(which(smallCN$end[smallPos] <= opt$start))),
+            rep("target", length(which(smallCN$start[smallPos] >= opt$start & 
+                                         smallCN$end[smallPos] <= opt$end))),
+            rep("downstream", length(which(smallCN$start[smallPos] >= opt$end))))
+
+stats <- data.frame(copynum = smallCN[smallPos,5], 
+                    position = factor(labels, levels = c("upstream", "target", "downstream")))
+
+# perform and record some distribution comparisons
+cat(paste0("Comparing copy number of bins in targeted region and the ",
+           "two adjacent upstream and downstream areas of equal length."))
+
+for (choice in list(c("upstream", "target"), 
+                    c("target", "downstream"), 
+                    c("upstream", "downstream"))) {
+  cat(sprintf(paste0("\n--- Comparing '%s' to '%s' ---\n"),
+              choice[1], choice[2]))
+  if (length(which(stats$position == choice[1])) < 1 | 
+      length(which(stats$position == choice[2])) < 1) {
+    cat("Not enough bins in target or adjacent positions. Skipping...")
+    next
+  }
+  try({ks <- ks.test(stats$copynum[stats$position == choice[1]],
+                         stats$copynum[stats$position == choice[2]])
+            # cat(sprintf("\nTwo-sample Kolmogorov-Smirnov test p-value: %f\n", 
+              # ks$p.value))
+           }, TRUE)
+  # can only compare two factors at once
+  omit <- stats[stats$position == choice[1] | stats$position == choice[2],]
+  wilcox <- wilcox.test(copynum ~ position, data = omit)
+  cat(sprintf("\n%s p-value: %f\n", wilcox$method, wilcox$p.value))
+  ttest <- t.test(copynum ~ position, data = omit)
+  cat(sprintf("\n%s p-value: %f\n", ttest$method, ttest$p.value))
+  cat(sprintf("\nMean in %s: %f\nMean in %s: %f\n",
+              choice[1], ttest$estimate[1], choice[2], ttest$estimate[2]))
+} 
+
+if (opt$saveplots) {
+  # plot the histograms
+  title <- sprintf("%ikbp_insert%ikbp_%s", opt$largebins, 
+                   opt$smallbins, opt$out)
+  png(filename = sprintf("targeted_bin_distribution_%s.png", title),
+      width = 960, height = 960, units = "px") 
+  ggplot(stats, aes(x = copynum, fill = position)) + 
+    geom_histogram(bins = 60) +
+    scale_fill_brewer(palette="Dark2") +
+    theme_light() +
+    theme(legend.position = "none") +
+    xlab("Copy number of bin") +
+    ylab("Number of bins") +
+    facet_wrap(~ position, ncol = 1)
+  dev.off()
+}

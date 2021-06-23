@@ -1,0 +1,12 @@
+FROM r-base:latest
+
+COPY low_pass_cna_tool.R /low_pass_cna_tool.R
+
+RUN R --vanilla -e 'install.packages("BiocManager", repos = "http://cran.us.r-project.org")'
+
+RUN R --vanilla -e 'BiocManager::install("QDNAseq")'
+RUN R --vanilla -e 'BiocManager::install("QDNAseq.hg19")'
+RUN R --vanilla -e 'BiocManager::install("BSgenome")'
+RUN R --vanilla -e 'BiocManager::install("Biobase")'
+RUN R --vanilla -e 'BiocManager::install("BSgenome.Hsapiens.UCSC.hg19")'
+
