@@ -305,9 +305,9 @@ write.table(segOut,
 
 ## sub igv bins ##
 if (F) {
-  largeNames <- list(copynum = "testing/1000kbp_KHC-10-egfr.CN.igv")
-  smallNames <- list(copynum = "testing/50kbp_KHC-10-egfr.CN.igv")
-  opt <- list(chromosome = 7, start = 54600000, end = 55550000) 
+  largeNames <- list(copynum = "testing/500kbp_insert5kbp_CN_stats.igv")
+  smallNames <- list(copynum = "testing/5kbp_stats.CN.igv")
+  opt <- list(chromosome = 7, start = 55086725, end = 55275031) 
   posSpan <- opt$end - opt$start
   fullStart <- opt$start - posSpan
   fullStop <- opt$end + posSpan
@@ -334,9 +334,9 @@ smallOverlaps <- function(binTup, posTup) {
 }
 
 for (i in largePos) {
-  percentCovered <- (smallOverlaps(c(largeCN$start[i], largeCN$end[i]),
-                                   c(fullStart, fullStop)))
-  if (percentCovered < 0.1) {
+  percentCovered <- smallOverlaps(c(largeCN$start[i], largeCN$end[i]),
+                                   c(fullStart, fullStop))
+  if (abs(percentCovered) < 0.03) {
     largePos <- largePos[-which(largePos == i)]
   }
 }
@@ -347,7 +347,9 @@ if (length(largePos) == 0) {
                       "you have the right chromosome and positions?"), 
                largeNames$copynum))
 }
-smallPos <- findOverlap(smallCN, opt$chromosome, min(largeCN$start[largePos]),
+
+smallPos <- findOverlap(smallCN, opt$chromosome, 
+                        min(largeCN$start[largePos]),
                         max(largeCN$end[largePos]))
 
 outbins <- rbind(largeCN[1:(min(largePos)-1),],
@@ -366,8 +368,8 @@ write(c("#type=COPY_NUMBER", "#track coords=1", igvTemp),
 # statistics
 # TODO: check read counts?
 labels <- c(rep("upstream", length(which(smallCN$end[smallPos] <= opt$start))),
-            rep("target", length(which(smallCN$start[smallPos] >= opt$start & 
-                                         smallCN$end[smallPos] <= opt$end))),
+            rep("target", length(which(smallCN$end[smallPos] > opt$start & 
+                                         smallCN$start[smallPos] < opt$end))),
             rep("downstream", length(which(smallCN$start[smallPos] >= opt$end))))
 
 stats <- data.frame(copynum = smallCN[smallPos,5], 
@@ -389,8 +391,8 @@ for (choice in list(c("upstream", "target"),
   }
   try({ks <- ks.test(stats$copynum[stats$position == choice[1]],
                          stats$copynum[stats$position == choice[2]])
-            # cat(sprintf("\nTwo-sample Kolmogorov-Smirnov test p-value: %f\n", 
-              # ks$p.value))
+            cat(sprintf("\nTwo-sample Kolmogorov-Smirnov test p-value: %f\n",
+            ks$p.value))
            }, TRUE)
   # can only compare two factors at once
   omit <- stats[stats$position == choice[1] | stats$position == choice[2],]
@@ -406,8 +408,9 @@ if (opt$saveplots) {
   # plot the histograms
   title <- sprintf("%ikbp_insert%ikbp_%s", opt$largebins, 
                    opt$smallbins, opt$out)
-  png(filename = sprintf("targeted_bin_distribution_%s.png", title),
-      width = 960, height = 960, units = "px") 
+  title <- sprintf("hist_bin_distribution_%s.png", title)
+  cat(title)
+  png(filename = title, width = 960, height = 960, units = "px") 
   ggplot(stats, aes(x = copynum, fill = position)) + 
     geom_histogram(bins = 60) +
     scale_fill_brewer(palette="Dark2") +
