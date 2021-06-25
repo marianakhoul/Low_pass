@@ -2,6 +2,7 @@
 *.igv
 *.seg
 bigWigAverageOverBed
+*.png
 *.txt
 *.bed
 *.RData
