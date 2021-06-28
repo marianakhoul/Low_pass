@@ -305,9 +305,10 @@ write.table(segOut,
 
 ## sub igv bins ##
 if (F) {
-  largeNames <- list(copynum = "testing/500kbp_insert5kbp_CN_stats.igv")
-  smallNames <- list(copynum = "testing/5kbp_stats.CN.igv")
-  opt <- list(chromosome = 7, start = 55086725, end = 55275031) 
+  setwd("~/Documents/Low_pass/")
+  largeNames <- list(copynum = "testing/500kbp_ulpCNA_21-06-25_16:52.CN.igv")
+  smallNames <- list(copynum = "testing/50kbp_ulpCNA_21-06-25_16:52.CN.igv")
+  opt <- list(chromosome = 7, start = 54500000, end = 56000000) 
   posSpan <- opt$end - opt$start
   fullStart <- opt$start - posSpan
   fullStop <- opt$end + posSpan
@@ -367,49 +368,68 @@ write(c("#type=COPY_NUMBER", "#track coords=1", igvTemp),
 
 # statistics
 # TODO: check read counts?
-labels <- c(rep("upstream", length(which(smallCN$end[smallPos] <= opt$start))),
+labels <- c(rep("nontarget", length(which(smallCN$end[smallPos] <= opt$start))),
             rep("target", length(which(smallCN$end[smallPos] > opt$start & 
                                          smallCN$start[smallPos] < opt$end))),
-            rep("downstream", length(which(smallCN$start[smallPos] >= opt$end))))
+            rep("nontarget", length(which(smallCN$start[smallPos] >= opt$end))))
 
 stats <- data.frame(copynum = smallCN[smallPos,5], 
-                    position = factor(labels, levels = c("upstream", "target", "downstream")))
+                    position = factor(labels, levels = c("nontarget", "target")))
 
 # perform and record some distribution comparisons
 cat(paste0("Comparing copy number of bins in targeted region and the ",
            "two adjacent upstream and downstream areas of equal length."))
 
-for (choice in list(c("upstream", "target"), 
-                    c("target", "downstream"), 
-                    c("upstream", "downstream"))) {
-  cat(sprintf(paste0("\n--- Comparing '%s' to '%s' ---\n"),
-              choice[1], choice[2]))
-  if (length(which(stats$position == choice[1])) < 1 | 
-      length(which(stats$position == choice[2])) < 1) {
-    cat("Not enough bins in target or adjacent positions. Skipping...")
-    next
+# compare the distribtions to one another
+
+eqVar <- var.test(stats$copynum ~ stats$position)$p.value >= 0.05
+ttest <- t.test(stats$copynum ~ stats$position, var.equal = eqVar)
+cat(sprintf(paste0("Comparing the distribtions (target vs non-target).\n",
+                   "Using %s"), ttest$method))
+# print lots of info
+if (ttest$p.value < 0.05) {
+  cat(sprintf(paste0("A significant difference between the target and non-target",
+                     " distibutions was detected (p-value: %f). Determining ",
+                     "which region is greater or lesser..."),
+              ttest$p.value))
+  # target GREATER than nontarget
+  greaterT <- t.test(stats$copynum[stats$position == "target"], 
+         mu=mean(stats$copynum[stats$position == "nontarget"]), 
+         alternative="greater", var.equal = eqVar)
+  # target LESS than nontarget
+  lesserT <- t.test(stats$copynum[stats$position == "target"], 
+         mu=mean(stats$copynum[stats$position == "nontarget"]), 
+         alternative="less", var.equal = eqVar)
+  if (greaterT$p.value < 0.05) {
+    wordChoice <- "greater than"
+    pval <- greaterT$p.value
+  } else {
+    wordChoice <- "less than"
+    pval <- lesserT$p.value
   }
-  try({ks <- ks.test(stats$copynum[stats$position == choice[1]],
-                         stats$copynum[stats$position == choice[2]])
-            cat(sprintf("\nTwo-sample Kolmogorov-Smirnov test p-value: %f\n",
-            ks$p.value))
-           }, TRUE)
-  # can only compare two factors at once
-  omit <- stats[stats$position == choice[1] | stats$position == choice[2],]
-  wilcox <- wilcox.test(copynum ~ position, data = omit)
-  cat(sprintf("\n%s p-value: %f\n", wilcox$method, wilcox$p.value))
-  ttest <- t.test(copynum ~ position, data = omit)
-  cat(sprintf("\n%s p-value: %f\n", ttest$method, ttest$p.value))
-  cat(sprintf("\nMean in %s: %f\nMean in %s: %f\n",
-              choice[1], ttest$estimate[1], choice[2], ttest$estimate[2]))
-} 
+  cat(sprintf(paste0("\nThe distribtion of copy numbers across the bins ",
+                     "in the target area were found to be %s the non-target ",
+                     "area. \np-value: %f, target bins: %i non-target bins: %i"),
+              wordChoice, pval, length(which(stats$position == "target")),
+              length(which(stats$position == "nontarget"))))
+} else {
+  cat(sprintf(paste0("No signficant difference found in the disitribtion ",
+                     "of copy numbers in bins between target and non-target ",
+                     "regions.\n p-value: %f, target bins: %i non-target bins: %i"),
+              ttest$p.value, length(which(stats$position == "target")),
+              length(which(stats$position == "nontarget"))))
+}
+
+
 
 if (opt$saveplots) {
   # plot the histograms
   title <- sprintf("%ikbp_insert%ikbp_%s", opt$largebins, 
                    opt$smallbins, opt$out)
   title <- sprintf("hist_bin_distribution_%s.png", title)
-  cat(title)
+  if (length(title) < 1) {
+    title <- "position_distribution.png"
+  }
   png(filename = title, width = 960, height = 960, units = "px") 
   ggplot(stats, aes(x = copynum, fill = position)) + 
     geom_histogram(bins = 60) +

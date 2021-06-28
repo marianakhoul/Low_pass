@@ -1,9 +1,10 @@
 FROM r-base:latest
 
-COPY low_pass_cna_tool.R /low_pass_cna_tool.R
+RUN apt-get update
+RUN apt-get -y install curl libcurl4-gnutls-dev apt-transport-https \
+  ca-certificates gnupg lsb-release libxml2-dev
 
 RUN R --vanilla -e 'install.packages("BiocManager", repos = "http://cran.us.r-project.org")'
-
 
 # needs curl
 RUN R --vanilla -e 'BiocManager::install("QDNAseq")'
@@ -16,6 +17,6 @@ RUN R --vanilla -e 'install.packages("ggplot2", repos = "http://cran.us.r-projec
 RUN R --vanilla -e 'install.packages("dplyr", repos = "http://cran.us.r-project.org")'
 RUN R --vanilla -e 'install.packages("future", repos = "http://cran.us.r-project.org")'
 
+COPY low_pass_cna_tool.R /low_pass_cna_tool.R
 
-COPY testing/KHC-10_SY-7661_S10_Sample_With_EGFR_AMP.bam /KHC-10.bam
 
