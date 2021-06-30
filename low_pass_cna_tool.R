@@ -32,6 +32,9 @@ option_list = list(
   make_option(c("-p", "--saveplots"), type="logical", default=FALSE, 
               help="Save plots of QDNAseq outputs using --out as labels. Default=%default", 
               metavar="logical"),
+  make_option(c("-w", "--warnings"), type="logical", default=TRUE, 
+              help="Enable warnings. FALSE skips prompts that warn of negative behavior. Default=%default", 
+              metavar="logical"),
   make_option(c("-o", "--out"), type="character", 
               default=sprintf("ulpCNA_%s", current_time), 
               help="output file name. Default=\"%default\"", metavar="character")
@@ -306,8 +309,8 @@ write.table(segOut,
 ## sub igv bins ##
 if (F) {
   setwd("~/Documents/Low_pass/")
-  largeNames <- list(copynum = "testing/500kbp_ulpCNA_21-06-25_16:52.CN.igv")
-  smallNames <- list(copynum = "testing/50kbp_ulpCNA_21-06-25_16:52.CN.igv")
+  largeNames <- list(copynum = "testing/500kbp_test.CN.igv")
+  smallNames <- list(copynum = "testing/5kbp_test.CN.igv")
   opt <- list(chromosome = 7, start = 54500000, end = 56000000) 
   posSpan <- opt$end - opt$start
   fullStart <- opt$start - posSpan
@@ -353,6 +356,23 @@ smallPos <- findOverlap(smallCN, opt$chromosome,
                         min(largeCN$start[largePos]),
                         max(largeCN$end[largePos]))
 
+# warn if there are empty bins in the target area
+if (opt$warnings) {
+  for (i in c(2:length(smallPos))) {
+    print(i)
+    if (smallCN[smallPos,][i,2] - smallCN[smallPos,][i-1,3] > 1){
+      response <- readline(prompt=paste0("A bin with no reads was found ",
+                                         "in the data. Try using larger ",
+                                         "bin sizes. Continue? (Y/n): "))
+      if (grepl("Y", response, ignore.case = T) | response == "") {
+        break
+      } else {
+        stop("Bin found with no reads present, halting program...")
+      }
+    }
+  }
+}
+
 outbins <- rbind(largeCN[1:(min(largePos)-1),],
                  smallCN[smallPos,],
                  largeCN[(max(largePos)+1):nrow(largeCN),])
@@ -377,18 +397,18 @@ stats <- data.frame(copynum = smallCN[smallPos,5],
                     position = factor(labels, levels = c("nontarget", "target")))
 
 # perform and record some distribution comparisons
-cat(paste0("Comparing copy number of bins in targeted region and the ",
+cat(paste0("\nComparing copy number of bins in targeted region and the ",
            "two adjacent upstream and downstream areas of equal length."))
 
-# compare the distribtions to one another
+# compare the distributions to one another
 
 eqVar <- var.test(stats$copynum ~ stats$position)$p.value >= 0.05
 ttest <- t.test(stats$copynum ~ stats$position, var.equal = eqVar)
-cat(sprintf(paste0("Comparing the distribtions (target vs non-target).\n",
+cat(sprintf(paste0("\nComparing the distribtions (target vs non-target).\n",
                    "Using %s"), ttest$method))
 # print lots of info
 if (ttest$p.value < 0.05) {
-  cat(sprintf(paste0("A significant difference between the target and non-target",
+  cat(sprintf(paste0("\nA significant difference between the target and non-target",
                      " distibutions was detected (p-value: %f). Determining ",
                      "which region is greater or lesser..."),
               ttest$p.value))
@@ -412,15 +432,19 @@ if (ttest$p.value < 0.05) {
                      "area. \np-value: %f, target bins: %i non-target bins: %i"),
               wordChoice, pval, length(which(stats$position == "target")),
               length(which(stats$position == "nontarget"))))
+  cat(sprintf("\nTarget copy num mean: %f Nontarget mean: %f\n",
+              mean(stats$copynum[stats$position == "target"]),
+              mean(stats$copynum[stats$position == "nontarget"])))
 } else {
   cat(sprintf(paste0("No signficant difference found in the disitribtion ",
                      "of copy numbers in bins between target and non-target ",
                      "regions.\n p-value: %f, target bins: %i non-target bins: %i"),
               ttest$p.value, length(which(stats$position == "target")),
               length(which(stats$position == "nontarget"))))
+  cat(sprintf("\nTarget copy num mean: %f Nontarget mean: %f\n",
+              mean(stats$copynum[stats$position == "target"]),
+              mean(stats$copynum[stats$position == "nontarget"])))
 }
-
-
 
 if (opt$saveplots) {
   # plot the histograms
@@ -440,4 +464,4 @@ if (opt$saveplots) {
     ylab("Number of bins") +
     facet_wrap(~ position, ncol = 1)
   dev.off()
-}
+} 
