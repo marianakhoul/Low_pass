@@ -98,7 +98,7 @@ options(scipen=999999999)
 # load custom segments function if flagged
 if (opt$zerosegments) {
   exportSEG <- function(obj, fnames=NULL) {
-    cat("Overwriting segment calling function.")
+    cat("Overwriting segment calling function.\nd")
     
     calls <- assayDataElement(obj, "calls")
     # segments <- log2adhoc(assayDataElement(obj, "segmented"))
@@ -309,8 +309,8 @@ write.table(segOut,
 ## sub igv bins ##
 if (F) {
   setwd("~/Documents/Low_pass/")
-  largeNames <- list(copynum = "testing/500kbp_test.CN.igv")
-  smallNames <- list(copynum = "testing/5kbp_test.CN.igv")
+  largeNames <- list(copynum = "testing/500kbp_variance.CN.igv")
+  smallNames <- list(copynum = "testing/5kbp_variance.CN.igv")
   opt <- list(chromosome = 7, start = 54500000, end = 56000000) 
   posSpan <- opt$end - opt$start
   fullStart <- opt$start - posSpan
@@ -359,7 +359,6 @@ smallPos <- findOverlap(smallCN, opt$chromosome,
 # warn if there are empty bins in the target area
 if (opt$warnings) {
   for (i in c(2:length(smallPos))) {
-    print(i)
     if (smallCN[smallPos,][i,2] - smallCN[smallPos,][i-1,3] > 1){
       response <- readline(prompt=paste0("A bin with no reads was found ",
                                          "in the data. Try using larger ",
@@ -369,6 +368,24 @@ if (opt$warnings) {
       } else {
         stop("Bin found with no reads present, halting program...")
       }
+    }
+  }
+}
+
+# warn if any bins are outside one SD
+mean <- mean(smallCN[smallPos,5])
+sd <- sqrt(var(smallCN[smallPos,5]))
+numOutsideSD <- length(which(smallCN[smallPos,5] < (mean - 1.5*sd)))
+if (numOutsideSD > 0){
+  if (opt$warnings){
+    cat(sprintf("\n%i bin(s) were found to be outside 1.5 SD.\n", numOutsideSD))
+    response <- readline(prompt=paste0("\nThis could indicate the bin size ",
+                                       "is too small. Consider using larger ",
+                                       "bins. Continue? (Y/n): "))
+    if (grepl("Y", response, ignore.case = T) | response == "") {
+      next
+    } else {
+      stop("Bin found with low reads, halting program...")
     }
   }
 }
@@ -401,7 +418,9 @@ cat(paste0("\nComparing copy number of bins in targeted region and the ",
            "two adjacent upstream and downstream areas of equal length."))
 
 # compare the distributions to one another
-
+cat(sprintf(paste0("\nNum target bins: %i non-target bins: %i\n"),
+            length(which(stats$position == "target")),
+            length(which(stats$position == "nontarget"))))
 eqVar <- var.test(stats$copynum ~ stats$position)$p.value >= 0.05
 ttest <- t.test(stats$copynum ~ stats$position, var.equal = eqVar)
 cat(sprintf(paste0("\nComparing the distribtions (target vs non-target).\n",
@@ -436,7 +455,7 @@ if (ttest$p.value < 0.05) {
               mean(stats$copynum[stats$position == "target"]),
               mean(stats$copynum[stats$position == "nontarget"])))
 } else {
-  cat(sprintf(paste0("No signficant difference found in the disitribtion ",
+  cat(sprintf(paste0("\nNo signficant difference found in the disitribtion ",
                      "of copy numbers in bins between target and non-target ",
                      "regions.\n p-value: %f, target bins: %i non-target bins: %i"),
               ttest$p.value, length(which(stats$position == "target")),
@@ -455,7 +474,7 @@ if (opt$saveplots) {
     title <- "position_distribution.png"
   }
   png(filename = title, width = 960, height = 960, units = "px") 
-  ggplot(stats, aes(x = copynum, fill = position)) + 
+  p <- ggplot(stats, aes(x = copynum, fill = position)) + 
     geom_histogram(bins = 60) +
     scale_fill_brewer(palette="Dark2") +
     theme_light() +
@@ -463,5 +482,6 @@ if (opt$saveplots) {
     xlab("Copy number of bin") +
     ylab("Number of bins") +
     facet_wrap(~ position, ncol = 1)
+  print(p)
   dev.off()
 } 
