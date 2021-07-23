@@ -309,9 +309,9 @@ write.table(segOut,
 ## sub igv bins ##
 if (F) {
   setwd("~/Documents/Low_pass/")
-  largeNames <- list(copynum = "testing/500kbp_erbb2.CN.igv")
-  smallNames <- list(copynum = "testing/50kbp_erbb2.CN.igv")
-  opt <- list(chromosome = 17, start = 37000000, end = 38000000) 
+  largeNames <- list(copynum = "testing/500kbp_try2.CN.igv")
+  smallNames <- list(copynum = "testing/50kbp_try2.CN.igv")
+  opt <- list(chromosome = 7, start = 54000000, end = 56000000) 
   opt$warnings <- F
   posSpan <- opt$end - opt$start
   fullStart <- opt$start - posSpan
@@ -328,14 +328,18 @@ smallOverlaps <- function(binTup, posTup) {
   # TODO: this might be sus
   # determines the percentage of overlap for a bin with position
   # "tuple"  means just c(1, 1), i know, i know
-  if (binTup[2] >= posTup[1] & binTup[2] < posTup[2]) {
-    return((binTup[2] - posTup[1])/(binTup[2]-binTup[1]))
-  }
-  else if (binTup[1] <= posTup[2] & binTup[2] > posTup[2]) {
-    return((binTup[1] - posTup[2])/(binTup[2] - binTup[1]))
-  }
-  else {
-    return(0) # bin does not partially overlap
+  if ((binTup[1] < posTup[1] & binTup[2] <= posTup[1]) | 
+      (binTup[1] >= posTup[2] & binTup[2] > posTup[2])) {
+    return(0)
+  } else if (binTup[1] < posTup[1] & binTup[2] >= posTup[1]) {
+    return("overlap start")
+    return((binTup[2] - posTup[1])/(binTup[2] - binTup[1]))
+  } else if (binTup[1] < posTup[2] & binTup[2] >= posTup[2]) {
+    print("overlap end")
+    return((posTup[2] - binTup[2])/(binTup[2] - binTup[1]))
+  } else if (binTup[1] >= posTup[1] & binTup[2] <= posTup[2]){
+    print("contained")
+    return((binTup[2] - binTup[1])/(binTup[2] - binTup[1]))
   }
 }
 
