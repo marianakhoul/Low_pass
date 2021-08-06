@@ -6,10 +6,23 @@
 suppressPackageStartupMessages(require(optparse))
 current_time <- format(Sys.time(), "%y-%m-%d_%H:%M")
 validBins <- c(1, 5, 10, 15, 30, 50, 100, 500, 1000)
+# generated with cpdm_sample_processing.R
+defaultGenes <- 
+  data.frame(gene=c("CCND2", "CDK4", "MET", "KDR", "KIT", "PDGFRA",
+                    "RHEB", "XRCC2"),
+             chrom=c(12, 12, 7, 4, 4, 4, 7, 7),
+             start=c(4383459, 58143168, 116335903, 55946350, 55524310, 
+                     55125049, 151164346, 151164346),
+             end=c(4409232, 58145511, 116436179, 55991522, 55604790, 
+                   55161497, 151216655, 151216655))
 #### Set up command line arguments ####
 option_list = list(
   make_option(c("-b", "--bamfile"), type="character", default=NULL, 
               help="bamfile location", metavar="file path"),
+  make_option(c("-g", "--gene"), type="character", default=NULL,
+              help=paste0("specify a gene name instead of chrom, start, end",
+                          " to use as region of interest. Current options:\n\t",
+                          paste0(defaultGenes$gene, collapse = ", "))),
   make_option(c("-c", "--chromosome"), type="integer", default=NULL, 
               help="chromosome where focal cnv is location", 
               metavar="integer"),
@@ -58,17 +71,28 @@ if (!opt$largebins %in% validBins) {
 if (!file.exists(opt$bamfile)) {
   stop(sprintf("Bam file %s not found.", opt$bamfile))
 }
-for (mandatoryOption in c("bamfile", "chromosome", "start", "end")) {
-  if (!exists(mandatoryOption, where=opt)) {
-    stop(sprintf("'%s' is a mandatory field with no default. Please specify.",
-                 mandatoryOption))
+if(!exists("bamfile", where=opt)){
+  stop(sprintf("--bamfile is a mandatory field with no default. Please specify."))
+}
+if(!exists("gene", where=opt)){
+  for (mandatoryOption in c("chromosome", "start", "end")) {
+    if (!exists(mandatoryOption, where=opt)) {
+      cat("--gene was not specified, chromosome, start, and end are mandatory.\n")
+      stop(sprintf("'%s' is a mandatory field with no default. Please specify.",
+                   mandatoryOption))
+    }
   }
 }
-
+# place coords into opt if gene is valid
+if (!opt$gene %in% defaultGenes$gene) {
+  stop(sprintf("'%s' not in valid gene list. Valid genes:\n %s",
+               opt$gene, paste0(defaultGenes$gene, collapse = ", ")))
+}
 # extend positions
 ## since we want to compare our area of interest to the surrounding 
 ## cn distribution, we extend the bin replacement up and downstream by
 ## the length of the input start - stop
+
 posSpan <- opt$end - opt$start
 fullStart <- opt$start - posSpan
 fullStop <- opt$end + posSpan
