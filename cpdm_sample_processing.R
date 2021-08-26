@@ -77,14 +77,14 @@ seg[which(seg$chrom == haMerge[row,3] &
             seg$loc.start <= haMerge[row,4] &
             seg$loc.end >= haMerge[row,5]),]
 
-findOverlap <- function(segmented, chrom, start, end, margin) {
+findOverlap <- function(segmented, chrom, start, end, margin, mean=0) {
   start <- start/margin
   end <- end*margin
   # contain
   positions <- which(segmented$loc.start >= start &
         segmented$loc.end <= end &
         segmented$chrom == chrom &
-        segmented$seg.mean >= 0.5)
+        segmented$seg.mean >= mean)
   return(positions)
 }
 
@@ -95,7 +95,7 @@ plotRegions <- function(row) {
   #                         seg$loc.end >= haMerge[row,5]),]
   tempPlot <- seg[findOverlap(seg, haMerge[row,3], 
                               haMerge[row,4], haMerge[row,5],
-                              1.05),]
+                              1.05, 0),]
   p <- ggplot(tempPlot, aes(x = factor(ID), y = loc.start, 
                        xend = factor(ID), yend = loc.end)) + 
     geom_segment(aes(col = seg.mean), size = 4) + 
@@ -108,7 +108,8 @@ plotRegions <- function(row) {
     xlab("CPDM ID") + ylab ("Position") +
     theme_minimal() +
     ggtitle(haMerge[row,1]) +
-    coord_flip()
+    coord_flip() +
+    theme(axis.text.x = element_text(angle = 27.5)) 
   return(p)
 }
 
@@ -130,13 +131,13 @@ regions <- data.frame(ID=NULL, chrom=NULL, loc.start=NULL, loc.end=NULL,
                       seg.mean=NULL, gene=NULL)
 for (i in c(1, 2, 13)) {
   df <- seg[findOverlap(seg, haMerge[i,3], haMerge[i,4], haMerge[i,5],
-                                   1.05),]
+                                   1.05, 0),]
   df$gene <- haMerge[i, 1]
   regions <- rbind(regions, df[which(df$seg.mean == max(df$seg.mean)),])
 }
 for (i in c(5, 10)) {
   df <- seg[findOverlap(seg, haMerge[i,3], haMerge[i,4], haMerge[i,5],
-                        1),]
+                        1, 0),]
   df$gene <- haMerge[i, 1]
   regions <- rbind(regions, df[which(df$ID == "CPDM_1883X"),])
 }
@@ -153,4 +154,68 @@ df <- seg[findOverlap(seg, haMerge[24,3], haMerge[24,4], haMerge[24,5],1.01),]
 df$gene <- haMerge[24, 1]
 regions <- rbind(regions, df[which(df$ID == "CPDM_0890X"),])
 
-write.csv(x = regions, file = "gene_regions")
+# write.csv(x = regions, file = "gene_regions")
+
+#### amplifcation graphs ####
+
+bigDt <- dt
+genesMart <- getBM(attributes = c("hgnc_symbol","chromosome_name", 
+                     "start_position", "end_position"), 
+                 filters = c("hgnc_symbol"), 
+                 values = list(bigDt$GENE), mart = mart)
+# get rid of non-standard genes
+genesMart <- genesMart[-which(grepl("_", genesMart$chromosome_name)),]
+orderedGenes <- data.frame(hgnc_symbol=NULL, chromosome_name=NULL, 
+                           start_position=NULL, end_position=NULL)
+for (row in 1:length(bigDt$GENE)) {
+  newRow <- genesMart[which(genesMart$hgnc_symbol == bigDt$GENE[row]),]
+  if (dim(newRow)[1] == 0) {
+    newRow <- data.frame(hgnc_symbol="NULL", chromosome_name=0, 
+                         start_position=0, end_position=0)
+    print(newRow)
+  }
+  orderedGenes <- rbind(orderedGenes, newRow)
+}
+
+bigDtPos <- cbind(bigDt, orderedGenes)
+bigDtPos <- bigDtPos[-which(bigDtPos$hgnc_symbol == "NULL"),]
+
+observedSeg <-  data.frame(ID=NULL, chrom=NULL, loc.start=NULL,
+                           loc.end=NULL, num.mark=NULL, seg.mean=NULL)
+for (row in 1:length(bigDtPos$CPDM_ID)) {
+  tempSeg <- seg[findOverlap(seg, bigDtPos[row,15], 
+                             bigDtPos[row,16], bigDtPos[row, 17], 1, 0),]
+  newRow <- tempSeg[which(tempSeg$ID == bigDtPos$CPDM_ID[row]),]
+  if (dim(newRow)[1] == 0) {
+    newRow <- data.frame(ID=NA, chrom=NA, loc.start=NA, loc.end=NA, 
+                         num.mark=NA, seg.mean=NA)
+  } 
+  observedSeg <- rbind(observedSeg, newRow[1,])
+}
+
+names(observedSeg) <- c("ID", "chrom", "seg.start", "seg.end", "num.mark", "seg.mean")
+beegDt <- cbind(bigDtPos, observedSeg)
+smolDt <- beegDt[which(!is.na(beegDt$seg.mean)),]
+smolDt2 <- smolDt[which(smolDt$CNV_TYPE_CD %in% c("HA", "LA")),]
+
+LAmean <- mean(smolDt$seg.mean[which(smolDt$CNV_TYPE_CD == "LA")])
+HAmean <- mean(smolDt$seg.mean[which(smolDt$CNV_TYPE_CD == "HA")])
+
+colorVec <- rep("black", 49)
+colorVec[c(8, 9, 22, 24, 27, 35, 41)] <- "red"
+
+ggplot(smolDt2, aes(GENE, seg.mean)) +
+  geom_rect(aes(xmin=-Inf, xmax = Inf, ymin=0, ymax=1), 
+            fill = "cyan", alpha = 0.005) +
+  geom_rect(aes(xmin=-Inf, xmax = Inf, ymin=1, ymax=Inf), 
+            fill = "pink", alpha = 0.005) +
+  geom_point(aes(col = CNV_TYPE_CD)) +
+  theme_minimal() +
+  ylab("log 2 copy number ratio") +
+  # geom_hline(yintercept =  LAmean) +
+  # geom_hline(yintercept = HAmean) +
+  # theme(axis.text.x = element_text(angle = 90)) +
+  theme(axis.text.x = element_text(
+    angle = 45,
+    color = colorVec)) 
+

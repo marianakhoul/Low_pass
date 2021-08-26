@@ -7,21 +7,26 @@ suppressPackageStartupMessages(require(optparse))
 current_time <- format(Sys.time(), "%y-%m-%d_%H:%M")
 validBins <- c(1, 5, 10, 15, 30, 50, 100, 500, 1000)
 # generated with cpdm_sample_processing.R
+# keep "ALL" as last element
 defaultGenes <- 
   data.frame(gene=c("CCND2", "CDK4", "MET", "KDR", "KIT", "PDGFRA",
-                    "RHEB", "XRCC2"),
-             chrom=c(12, 12, 7, 4, 4, 4, 7, 7),
+                    "RHEB", "XRCC2", "ALL"),
+             chrom=c(12, 12, 7, 4, 4, 4, 7, 7, NA),
              start=c(4383459, 58143168, 116335903, 55946350, 55524310, 
-                     55125049, 151164346, 151164346),
+                     55125049, 151164346, 151164346, NA),
              end=c(4409232, 58145511, 116436179, 55991522, 55604790, 
-                   55161497, 151216655, 151216655))
+                   55161497, 151216655, 151216655, NA))
+# add some extra space around the area
+defaultGenes$start <- defaultGenes$start - (75*1000)
+defaultGenes$end <- defaultGenes$end + (75*1000)
 #### Set up command line arguments ####
 option_list = list(
   make_option(c("-b", "--bamfile"), type="character", default=NULL, 
               help="bamfile location", metavar="file path"),
   make_option(c("-g", "--gene"), type="character", default=NULL,
-              help=paste0("specify a gene name instead of chrom, start, end",
-                          " to use as region of interest. Current options:\n\t",
+              help=paste0("specify gene names instead of chrom, start, end",
+                          " to use as region of interest.\n\t\t",
+                          "Must be comma separated. Specify 'ALL' to select all available genes.\n\tCurrent options:\n\t",
                           paste0(defaultGenes$gene, collapse = ", "))),
   make_option(c("-c", "--chromosome"), type="integer", default=NULL, 
               help="chromosome where focal cnv is location", 
@@ -31,7 +36,8 @@ option_list = list(
   make_option(c("-e", "--end"), type="integer", default=NULL, 
               help="ending position of focal cnv", metavar="coordinate"),
   make_option(c("-S", "--smallbins"), type="integer", default=50, 
-              help=sprintf("size of the small bins to insert in between start and end, in kilobases.\n\t\tValid sizes: %s", paste(validBins, collapse = ", ")), 
+              help=sprintf("size of the small bins to insert in between start and end, in kilobases.\n\t\tValid sizes: %s", 
+                           paste(validBins, collapse = ", ")), 
               metavar="integer"),
   make_option(c("-L", "--largebins"), type="integer", default=500, 
               help=sprintf("size of the larger bins that cover the remainder of the genome, in kilobase pairs.\n\t\tMUST be a multiple of small bin size.\n\t\tValid sizes: %s", paste(validBins, collapse = ", ")), 
@@ -55,6 +61,7 @@ option_list = list(
 
 opt_parser = OptionParser(option_list=option_list)
 opt = parse_args(opt_parser)
+print(opt)
 
 # catch some issues #
 if (opt$largebins %% opt$smallbins != 0) {
@@ -68,13 +75,25 @@ if (!opt$largebins %in% validBins) {
   stop("%i is not a valid bin size for large bins (-L). Valid bins are: ", opt$smallbins, 
        paste(validBins, collapse = ", "))
 }
-if (!file.exists(opt$bamfile)) {
-  stop(sprintf("Bam file %s not found.", opt$bamfile))
-}
 if(!exists("bamfile", where=opt)){
   stop(sprintf("--bamfile is a mandatory field with no default. Please specify."))
 }
-if(!exists("gene", where=opt)){
+if (!file.exists(opt$bamfile)) {
+  stop(sprintf("Bam file %s not found.", opt$bamfile))
+}
+if(exists("gene", where=opt)){
+  genes <- strsplit(opt$gene, ",")[[1]]
+  if ("ALL" %in% genes) {
+    genes <- defaultGenes$gene[1:length(defaultGenes$gene)-1]
+  }
+  # place coords into opt if gene is valid
+  for (gene in genes) {
+    if (!(gene %in% defaultGenes$gene)) {
+      stop(sprintf("'%s' not in valid gene list. Valid genes:\n %s",
+                   gene, paste0(defaultGenes$gene, collapse = ", ")))
+    }
+  }
+} else {
   for (mandatoryOption in c("chromosome", "start", "end")) {
     if (!exists(mandatoryOption, where=opt)) {
       cat("--gene was not specified, chromosome, start, and end are mandatory.\n")
@@ -83,30 +102,53 @@ if(!exists("gene", where=opt)){
     }
   }
 }
-# place coords into opt if gene is valid
-if (!opt$gene %in% defaultGenes$gene) {
-  stop(sprintf("'%s' not in valid gene list. Valid genes:\n %s",
-               opt$gene, paste0(defaultGenes$gene, collapse = ", ")))
-}
+
 # extend positions
 ## since we want to compare our area of interest to the surrounding 
 ## cn distribution, we extend the bin replacement up and downstream by
 ## the length of the input start - stop
 
-posSpan <- opt$end - opt$start
-fullStart <- opt$start - posSpan
-fullStop <- opt$end + posSpan
+geneDT <- data.frame(gene = NULL, chrom = NULL, span = NULL, 
+                     start = NULL, stop = NULL,  statStart = NULL, 
+                     statStop = NULL)
+if(exists("gene", where=opt)) {
+  for (gene in genes) {
+    geneRow <- defaultGenes[which(defaultGenes$gene == gene),]
+    posSpan <- geneRow$end - geneRow$start
+    tmp <- data.frame(gene = gene, span = posSpan,
+                      chrom = geneRow$chrom,
+                      start = geneRow$start, stop = geneRow$end, 
+                      statStart = geneRow$start - posSpan, 
+                      statStop = geneRow$end + posSpan)
+    geneDT <- rbind(geneDT, tmp)
+  }  
+} else {
+  posSpan <- opt$end - opt$start
+  geneDT <- data.frame(gene = "ulp", chrom=opt$chromosome, span = posSpan,
+                       start = opt$start, stop = opt$end, 
+                       statStart = opt$start - posSpan, 
+                       startStop = opt$end + posSpan)
+}
+# stop if span negative
+if (any(geneDT$span < 1)) {
+  stop(sprintf("The span of a region of interest cannot be negative. Span: %s",
+               paste(geneDT$span, collapse = ", ")))
+} 
+
 
 # detail inputs
-cat(sprintf(paste0("Combing QDNAseq outputs for %s.\n",
-                   "Replacing bins and segments in chromosome %i %i-%i\n",
-                   "comparing surrounding regions to %i-%i",
+cat(sprintf(paste0("Combining QDNAseq outputs for %s.\n",
                    "\nLarge bin size: %i, Small bin size: %i\n",
                    "Running on %i thread(s), custom segmenting function: %s\n",
                    "Files saved with tag %s\n"),
-            opt$bamfile, opt$chromosome, fullStart, fullStop, opt$start, 
-            opt$end, opt$largebins, opt$smallbins, opt$threads, 
+            opt$bamfile, opt$largebins, opt$smallbins, opt$threads, 
             opt$zerosegments, opt$out))
+for (row in 1:length(geneDT$gene)) {
+  cat(sprintf(
+    "For gene %s, replacing bins and segments in chromosome %i pos %i-%i\n",
+    geneDT$gene[row], geneDT$chrom[row], geneDT$start[row], geneDT$stop[row]
+  ))
+}
 
 # load noisy packages quietly
 suppressPackageStartupMessages(require(Biobase))
@@ -296,228 +338,232 @@ findOverlap <- function(segmented, chrom, start, end) {
   return(positions)
 }
 
-# combine segments
+#### combine segments ####
 if (F) {
-  largeNames <- list(seg = "testing/500kbp_test2.SEG.seg")
-  smallNames <- list(seg = "testing/50kbp_test2.SEG.seg")
+  largeNames <- list(seg = "testing/500kbp_t3.SEG.seg")
+  smallNames <- list(seg = "testing/50kbp_t3.SEG.seg")
   opt <- list(chromosome = 2, start = 16078672, end = 16089125)
 }
 
-largeSegs <- read.table(largeNames$seg, header = T)
-smallSegs <- read.table(smallNames$seg, header = T)
-
-# record the positions that overlap the region of interest
-largePos <- findOverlap(largeSegs, opt$chromosome, fullStart, fullStop)
-smallPos <- findOverlap(smallSegs, opt$chromosome, fullStart, fullStop)
-
-# find the start and stop of the small segment 
-smallSpan <- c(min(smallSegs$START[smallPos]), max(smallSegs$STOP[smallPos]))
-# the data.frame we will modify and reinsert
-insertFrame <- rbind(largeSegs[largePos,], largeSegs[largePos,])
-insertFrame$STOP[1] <- (smallSpan[1]-1) # truncate large segment lengths
-insertFrame$START[2] <- (smallSpan[2]+1)
-
-# create the full frame with the new segments for large and small
-segOut <- rbind(largeSegs[1:(largePos-1),],
-                rbind(insertFrame[1,], smallSegs[smallPos,], insertFrame[2,]),
-                largeSegs[(largePos+1):nrow(largeSegs),])
-segOut[,1] <- rep(sprintf("%ikbp_insert%ikbp_%s", opt$largebins, 
-                          opt$smallbins, opt$out),
-                  dim(segOut)[1]) # change the name for igv
-
-write.table(segOut, 
-            file = sprintf("%ikbp_insert%ikbp_%s.seg", opt$largebins, 
-                           opt$smallbins, opt$out), 
-            quote = F, row.names = F, sep = "\t")
-
-## sub igv bins ##
-if (F) {
-  setwd("~/Documents/Low_pass/")
-  largeNames <- list(copynum = "testing/500kbp_try2.CN.igv")
-  smallNames <- list(copynum = "testing/50kbp_try2.CN.igv")
-  opt <- list(chromosome = 7, start = 54000000, end = 56000000) 
-  opt$warnings <- F
-  posSpan <- opt$end - opt$start
-  fullStart <- opt$start - posSpan
-  fullStop <- opt$end + posSpan
+combineSegs <- function(gene, chrom, start, stop) {
+  largeSegs <- read.table(largeNames$seg, header = T)
+  smallSegs <- read.table(smallNames$seg, header = T)
+  
+  # record the positions that overlap the region of interest
+  largePos <- findOverlap(largeSegs, chrom, start, stop)
+  smallPos <- findOverlap(smallSegs, chrom, start, stop)
+  
+  # find the start and stop of the small segment 
+  smallSpan <- c(min(smallSegs$START[smallPos]), max(smallSegs$STOP[smallPos]))
+  # the data.frame we will modify and reinsert
+  insertFrame <- rbind(largeSegs[largePos,], largeSegs[largePos,])
+  insertFrame$STOP[1] <- (smallSpan[1]-1) # truncate large segment lengths
+  insertFrame$START[2] <- (smallSpan[2]+1)
+  
+  # create the full frame with the new segments for large and small
+  segOut <- rbind(largeSegs[1:(largePos-1),],
+                  rbind(insertFrame[1,], smallSegs[smallPos,], insertFrame[2,]),
+                  largeSegs[(largePos+1):nrow(largeSegs),])
+  segOut$LOG2_RATIO_MEAN > 1.0
+  segOut[,1] <- rep(sprintf("%s_%ikbp_insert%ikbp_%s", gene,
+                            opt$largebins, opt$smallbins, opt$out),
+                    dim(segOut)[1]) # change the name for igv
+  
+  write.table(segOut, 
+              file = sprintf("%s_%ikbp_insert%ikbp_%s.seg", gene,
+                             opt$largebins, opt$smallbins, opt$out), 
+              quote = F, row.names = F, sep = "\t")
 }
 
-largeCN <- read.table(largeNames$copynum, header = T)
-smallCN <- read.table(smallNames$copynum, header = T)
+for (row in 1:length(geneDT$gene)) {
+  combineSegs(geneDT$gene[row], geneDT$chrom[row], geneDT$start[row],
+              geneDT$stop[row])
+}
 
-largePos <- findOverlap(largeCN, opt$chromosome, fullStart, fullStop)
-# remove bins that don't have 10%? covered by the position of interest
+#### sub igv bins ####
 
 smallOverlaps <- function(binTup, posTup) {
-  # TODO: this might be sus
   # determines the percentage of overlap for a bin with position
   # "tuple"  means just c(1, 1), i know, i know
+  # remove bins that don't have 10%? covered by the position of interest
   if ((binTup[1] < posTup[1] & binTup[2] <= posTup[1]) | 
       (binTup[1] >= posTup[2] & binTup[2] > posTup[2])) {
     return(0)
   } else if (binTup[1] < posTup[1] & binTup[2] >= posTup[1]) {
-    return("overlap start")
     return((binTup[2] - posTup[1])/(binTup[2] - binTup[1]))
   } else if (binTup[1] < posTup[2] & binTup[2] >= posTup[2]) {
-    print("overlap end")
     return((posTup[2] - binTup[2])/(binTup[2] - binTup[1]))
   } else if (binTup[1] >= posTup[1] & binTup[2] <= posTup[2]){
-    print("contained")
     return((binTup[2] - binTup[1])/(binTup[2] - binTup[1]))
   }
 }
 
-for (i in largePos) {
-  percentCovered <- smallOverlaps(c(largeCN$start[i], largeCN$end[i]),
-                                   c(fullStart, fullStop))
-  if (abs(percentCovered) < 0.03) {
-    largePos <- largePos[-which(largePos == i)]
+# statistics
+runStats <- function(smallCN, smallPos, gene, chrom, start, stop){
+  labels <- c(rep("nontarget", length(which(smallCN$end[smallPos] <= start))),
+              rep("target", length(which(smallCN$end[smallPos] > start & 
+                                           smallCN$start[smallPos] < stop))),
+              rep("nontarget", length(which(smallCN$start[smallPos] >= stop))))
+  
+  stats <- data.frame(copynum = smallCN[smallPos,5], 
+                      position = factor(labels, levels = c("nontarget", "target")))
+  
+  # perform and record some distribution comparisons
+  cat(paste0("\nComparing copy number of bins in targeted region and the ",
+             "two adjacent upstream and downstream areas of equal length."))
+  
+  # compare the distributions to one another
+  cat(sprintf(paste0("\nNum target bins: %i non-target bins: %i\n"),
+              length(which(stats$position == "target")),
+              length(which(stats$position == "nontarget"))))
+  eqVar <- var.test(stats$copynum ~ stats$position)$p.value >= 0.05
+  ttest <- t.test(stats$copynum ~ stats$position, var.equal = eqVar)
+  cat(sprintf(paste0("\nComparing the distribtions (target vs non-target).\n",
+                     "Using %s"), ttest$method))
+  # print lots of info
+  if (ttest$p.value < 0.05) {
+    cat(sprintf(paste0("\nA significant difference between the target and non-target",
+                       " distibutions was detected (p-value: %f). Determining ",
+                       "which region is greater or lesser..."),
+                ttest$p.value))
+    # target GREATER than nontarget
+    greaterT <- t.test(stats$copynum[stats$position == "target"], 
+                       mu=mean(stats$copynum[stats$position == "nontarget"]), 
+                       alternative="greater", var.equal = eqVar)
+    # target LESS than nontarget
+    lesserT <- t.test(stats$copynum[stats$position == "target"], 
+                      mu=mean(stats$copynum[stats$position == "nontarget"]), 
+                      alternative="less", var.equal = eqVar)
+    if (greaterT$p.value < 0.05) {
+      wordChoice <- "greater than"
+      pval <- greaterT$p.value
+    } else {
+      wordChoice <- "less than"
+      pval <- lesserT$p.value
+    }
+    cat(sprintf(paste0("\nThe distribtion of copy numbers across the bins ",
+                       "in the target area were found to be %s the non-target ",
+                       "area. \np-value: %f, target bins: %i non-target bins: %i"),
+                wordChoice, pval, length(which(stats$position == "target")),
+                length(which(stats$position == "nontarget"))))
+    cat(sprintf("\nTarget copy num mean: %f Nontarget mean: %f\n",
+                mean(stats$copynum[stats$position == "target"]),
+                mean(stats$copynum[stats$position == "nontarget"])))
+  } else {
+    cat(sprintf(paste0("\nNo signficant difference found in the disitribtion ",
+                       "of copy numbers in bins between target and non-target ",
+                       "regions.\n p-value: %f, target bins: %i non-target bins: %i"),
+                ttest$p.value, length(which(stats$position == "target")),
+                length(which(stats$position == "nontarget"))))
+    cat(sprintf("\nTarget copy num mean: %f Nontarget mean: %f\n",
+                mean(stats$copynum[stats$position == "target"]),
+                mean(stats$copynum[stats$position == "nontarget"])))
   }
+  
+  if (opt$saveplots) {
+    # plot the histograms
+    title <- sprintf("%s_%ikbp_insert%ikbp_%s", gene, opt$largebins, 
+                     opt$smallbins, opt$out)
+    title <- sprintf("hist_bin_distribution_%s.png", title)
+    if (length(title) < 1) {
+      title <- "position_distribution.png"
+    }
+    png(filename = title, width = 960, height = 960, units = "px") 
+    p <- ggplot(stats, aes(x = copynum, fill = position)) + 
+      geom_histogram(bins = 60) +
+      scale_fill_brewer(palette="Dark2") +
+      theme_light() +
+      theme(legend.position = "none") +
+      xlab("Copy number of bin") +
+      ylab("Number of bins") +
+      facet_wrap(~ position, ncol = 1)
+    print(p)
+    dev.off()
+  } 
 }
 
-if (length(largePos) == 0) {
-  stop(sprintf(paste0("ERROR: No bins were found in the copy number ",
-                      "file %s at the area specified, are you sure ",
-                      "you have the right chromosome and positions?"), 
-               largeNames$copynum))
-}
-
-smallPos <- findOverlap(smallCN, opt$chromosome, 
-                        min(largeCN$start[largePos]),
-                        max(largeCN$end[largePos]))
-
-# warn if there are empty bins in the target area
-if (opt$warnings) {
-  for (i in c(2:length(smallPos))) {
-    if (smallCN[smallPos,][i,2] - smallCN[smallPos,][i-1,3] > 1){
-      response <- readline(prompt=paste0("A bin with no reads was found ",
-                                         "in the data. Try using larger ",
-                                         "bin sizes. Continue? (Y/n): "))
+combineBins <- function(gene, chrom, start, stop){
+  largeCN <- read.table(largeNames$copynum, header = T)
+  smallCN <- read.table(smallNames$copynum, header = T)
+  
+  largePos <- findOverlap(largeCN, chrom, start, stop)
+  
+  for (i in largePos) {
+    percentCovered <- smallOverlaps(c(largeCN$start[i], largeCN$end[i]),
+                                    c(start, stop))
+    if (abs(percentCovered) < 0.03) {
+      largePos <- largePos[-which(largePos == i)]
+    }
+  }
+  
+  if (length(largePos) == 0) {
+    stop(sprintf(paste0("ERROR: No bins were found in the copy number ",
+                        "file %s at the area specified, are you sure ",
+                        "you have the right chromosome and positions?"), 
+                 largeNames$copynum))
+  }
+  
+  smallPos <- findOverlap(smallCN, opt$chromosome, 
+                          min(largeCN$start[largePos]),
+                          max(largeCN$end[largePos]))
+  
+  # warn if there are empty bins in the target area
+  # if (opt$warnings) {
+  #   for (i in c(2:length(smallPos))) {
+  #     print(smallCN[smallPos,])
+  #     if (smallCN[smallPos,][i,2] - smallCN[smallPos,][i-1,3] > 1){
+  #       response <- readline(prompt=paste0("A bin with no reads was found ",
+  #                                          "in the data. Try using larger ",
+  #                                          "bin sizes. Continue? (Y/n): "))
+  #       if (grepl("Y", response, ignore.case = T) | response == "") {
+  #         break
+  #       } else {
+  #         stop("Bin found with no reads present, halting program...")
+  #       }
+  #     }
+  #   }
+  # }
+  
+  # warn if any bins are outside one SD
+  mean <- mean(smallCN[smallPos,5])
+  sd <- sqrt(var(smallCN[smallPos,5]))
+  numOutsideSD <- length(which(smallCN[smallPos,5] < (mean - 1.5*sd)))
+  if (numOutsideSD > 0){
+    if (opt$warnings){
+      cat(sprintf("\n%i bin(s) were found to be outside 1.5 SD.\n", numOutsideSD))
+      response <- readline(prompt=paste0("\nThis could indicate the bin size ",
+                                         "is too small. Consider using larger ",
+                                         "bins. Continue? (Y/n): "))
       if (grepl("Y", response, ignore.case = T) | response == "") {
-        break
+        next
       } else {
-        stop("Bin found with no reads present, halting program...")
+        stop("Bin found with low reads, halting program...")
       }
     }
   }
+  
+  # reassign large/small bins to not the stats areas
+  largePos <- findOverlap(largeCN, chrom, start, stop)
+  smallPos <- findOverlap(smallCN, chrom, 
+                          min(largeCN$start[largePos]),
+                          max(largeCN$end[largePos]))
+  
+  outbins <- rbind(largeCN[1:(min(largePos)-1),],
+                   smallCN[smallPos,],
+                   largeCN[(max(largePos)+1):nrow(largeCN),])
+  
+  igvOutFile <- sprintf("%s_%ikbp_insert%ikbp_CN_%s.igv", gene,
+                        opt$largebins, opt$smallbins, opt$out)
+  write.table(outbins, file = igvOutFile, 
+              quote = F, row.names = F, sep = "\t")
+  
+  igvTemp <- readLines(igvOutFile)
+  write(c("#type=COPY_NUMBER", "#track coords=1", igvTemp),
+        file = igvOutFile)
+  runStats(smallCN, smallPos, gene, chrom, start, stop)
 }
 
-# warn if any bins are outside one SD
-mean <- mean(smallCN[smallPos,5])
-sd <- sqrt(var(smallCN[smallPos,5]))
-numOutsideSD <- length(which(smallCN[smallPos,5] < (mean - 1.5*sd)))
-if (numOutsideSD > 0){
-  if (opt$warnings){
-    cat(sprintf("\n%i bin(s) were found to be outside 1.5 SD.\n", numOutsideSD))
-    response <- readline(prompt=paste0("\nThis could indicate the bin size ",
-                                       "is too small. Consider using larger ",
-                                       "bins. Continue? (Y/n): "))
-    if (grepl("Y", response, ignore.case = T) | response == "") {
-      next
-    } else {
-      stop("Bin found with low reads, halting program...")
-    }
-  }
+for (row in 1:length(geneDT$gene)) {
+  combineBins(geneDT$gene[row], geneDT$chrom[row], geneDT$start[row],
+              geneDT$stop[row])
 }
-
-# reassign large/small bins to not the stats areas
-largePos <- findOverlap(largeCN, opt$chromosome, opt$start, opt$end)
-smallPos <- findOverlap(smallCN, opt$chromosome, 
-                        min(largeCN$start[largePos]),
-                        max(largeCN$end[largePos]))
-
-outbins <- rbind(largeCN[1:(min(largePos)-1),],
-                 smallCN[smallPos,],
-                 largeCN[(max(largePos)+1):nrow(largeCN),])
-
-igvOutFile <- sprintf("%ikbp_insert%ikbp_CN_%s.igv", opt$largebins, 
-                      opt$smallbins, opt$out)
-write.table(outbins, file = igvOutFile, 
-            quote = F, row.names = F, sep = "\t")
-
-igvTemp <- readLines(igvOutFile)
-write(c("#type=COPY_NUMBER", "#track coords=1", igvTemp),
-      file = igvOutFile)
-
-# statistics
-# TODO: check read counts?
-labels <- c(rep("nontarget", length(which(smallCN$end[smallPos] <= opt$start))),
-            rep("target", length(which(smallCN$end[smallPos] > opt$start & 
-                                         smallCN$start[smallPos] < opt$end))),
-            rep("nontarget", length(which(smallCN$start[smallPos] >= opt$end))))
-
-stats <- data.frame(copynum = smallCN[smallPos,5], 
-                    position = factor(labels, levels = c("nontarget", "target")))
-
-# perform and record some distribution comparisons
-cat(paste0("\nComparing copy number of bins in targeted region and the ",
-           "two adjacent upstream and downstream areas of equal length."))
-
-# compare the distributions to one another
-cat(sprintf(paste0("\nNum target bins: %i non-target bins: %i\n"),
-            length(which(stats$position == "target")),
-            length(which(stats$position == "nontarget"))))
-eqVar <- var.test(stats$copynum ~ stats$position)$p.value >= 0.05
-ttest <- t.test(stats$copynum ~ stats$position, var.equal = eqVar)
-cat(sprintf(paste0("\nComparing the distribtions (target vs non-target).\n",
-                   "Using %s"), ttest$method))
-# print lots of info
-if (ttest$p.value < 0.05) {
-  cat(sprintf(paste0("\nA significant difference between the target and non-target",
-                     " distibutions was detected (p-value: %f). Determining ",
-                     "which region is greater or lesser..."),
-              ttest$p.value))
-  # target GREATER than nontarget
-  greaterT <- t.test(stats$copynum[stats$position == "target"], 
-         mu=mean(stats$copynum[stats$position == "nontarget"]), 
-         alternative="greater", var.equal = eqVar)
-  # target LESS than nontarget
-  lesserT <- t.test(stats$copynum[stats$position == "target"], 
-         mu=mean(stats$copynum[stats$position == "nontarget"]), 
-         alternative="less", var.equal = eqVar)
-  if (greaterT$p.value < 0.05) {
-    wordChoice <- "greater than"
-    pval <- greaterT$p.value
-  } else {
-    wordChoice <- "less than"
-    pval <- lesserT$p.value
-  }
-  cat(sprintf(paste0("\nThe distribtion of copy numbers across the bins ",
-                     "in the target area were found to be %s the non-target ",
-                     "area. \np-value: %f, target bins: %i non-target bins: %i"),
-              wordChoice, pval, length(which(stats$position == "target")),
-              length(which(stats$position == "nontarget"))))
-  cat(sprintf("\nTarget copy num mean: %f Nontarget mean: %f\n",
-              mean(stats$copynum[stats$position == "target"]),
-              mean(stats$copynum[stats$position == "nontarget"])))
-} else {
-  cat(sprintf(paste0("\nNo signficant difference found in the disitribtion ",
-                     "of copy numbers in bins between target and non-target ",
-                     "regions.\n p-value: %f, target bins: %i non-target bins: %i"),
-              ttest$p.value, length(which(stats$position == "target")),
-              length(which(stats$position == "nontarget"))))
-  cat(sprintf("\nTarget copy num mean: %f Nontarget mean: %f\n",
-              mean(stats$copynum[stats$position == "target"]),
-              mean(stats$copynum[stats$position == "nontarget"])))
-}
-
-if (opt$saveplots) {
-  # plot the histograms
-  title <- sprintf("%ikbp_insert%ikbp_%s", opt$largebins, 
-                   opt$smallbins, opt$out)
-  title <- sprintf("hist_bin_distribution_%s.png", title)
-  if (length(title) < 1) {
-    title <- "position_distribution.png"
-  }
-  png(filename = title, width = 960, height = 960, units = "px") 
-  p <- ggplot(stats, aes(x = copynum, fill = position)) + 
-    geom_histogram(bins = 60) +
-    scale_fill_brewer(palette="Dark2") +
-    theme_light() +
-    theme(legend.position = "none") +
-    xlab("Copy number of bin") +
-    ylab("Number of bins") +
-    facet_wrap(~ position, ncol = 1)
-  print(p)
-  dev.off()
-} 
