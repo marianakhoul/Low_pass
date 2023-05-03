@@ -19,7 +19,6 @@ RUN R --vanilla -e 'install.packages("future", repos = "http://cran.us.r-project
 
 COPY low_pass_cna_tool.R /low_pass_cna_tool.R
 COPY ./data ./data
-COPY ./testing ./testing
 
 RUN echo "alias ulp-tool='Rscript --vanilla /low_pass_cna_tool.R'" >> /root/.bashrc
 
