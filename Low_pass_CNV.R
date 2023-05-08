@@ -71,7 +71,7 @@ assignInNamespace("exportSEG",exportSEG,ns="QDNAseq")
 
 binsAndReads <- function(binSize, bamfile, threads){
   if(threads > 1){
-    future::plan("multiprocess", workers=threads)
+    future::plan("multicore", workers=threads)
   }
   bins <- getBinAnnotations(binSize, genome = "hg19")
   readCounts <- binReadCounts(bins, pairedEnds = T, bamfiles=bamfile)
