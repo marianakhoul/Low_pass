@@ -274,11 +274,11 @@ plotAll <- function(QDNAseqObj, title) {
   png(filename = sprintf("Isobar_plot_%s.png", title), width = 720, type="cairo")
   isobarPlot(QDNAseqObj$readCountsFiltered)
   dev.off()
-  png(filename = sprintf("Noise_plot_%s.png", title))
+  png(filename = sprintf("Noise_plot_%s.png", title), type="cairo")
   noisePlot(QDNAseqObj$readCountsFiltered)
   dev.off()
   png(filename = sprintf("Bins-segments_plot_%s.png", title),
-      width = 960, height = 960, units = "px") 
+      width = 960, height = 960, units = "px", type="cairo") 
   oldpar <- par(no.readonly=TRUE)
   par(mfrow=c(2,2))
   plot(QDNAseqObj$readCounts, logTransform=FALSE, 
@@ -470,7 +470,7 @@ runStats <- function(smallCN, smallPos, gene, chrom, start, stop){
     if (length(title) < 1) {
       title <- "position_distribution.png"
     }
-    png(filename = title, width = 960, height = 960, units = "px") 
+    png(filename = title, width = 960, height = 960, units = "px", type="cairo") 
     p <- ggplot(stats, aes(x = copynum, fill = position)) + 
       geom_histogram(bins = 60) +
       scale_fill_brewer(palette="Dark2") +
