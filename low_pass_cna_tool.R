@@ -1,8 +1,10 @@
 #!/usr/bin/env Rscript
 
-# Author: Taylor Falk, taylora_falk@dfci.harvard.edu
-# https://github.com/taytayp/Low_pass
+# Authors: 
+#Taylor Falk, taylora_falk@dfci.harvard.edu
+#Maria Nakhoul, maria_nakhoul@dfci.harvard.edu
 
+Sys.setenv("DISPLAY"=":0.0")
 suppressPackageStartupMessages(require(optparse))
 current_time <- format(Sys.time(), "%y-%m-%d_%H:%M")
 validBins <- c(1, 5, 10, 15, 30, 50, 100, 500, 1000)
