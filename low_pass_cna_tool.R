@@ -218,7 +218,7 @@ if (opt$zerosegments) {
 
 binsAndReads <- function(binSize, bamfile, threads){
   if(threads > 1){
-    future::plan("multiprocess", workers=threads)
+    future::plan("multicore", workers=threads)
   }
   bins <- getBinAnnotations(binSize, genome = "hg19")
   readCounts <- binReadCounts(bins, pairedEnds = T, bamfiles=bamfile)
@@ -231,7 +231,7 @@ binsAndReads <- function(binSize, bamfile, threads){
 filterAndBin <- function(readCounts, threads){
   # perform the main QDNAseq functions
   if(threads > 1){
-    future::plan("multiprocess", workers=threads)
+    future::plan("multicore", workers=threads)
   }
   readCountsFiltered <- applyFilters(readCounts, residual=TRUE, blacklist=TRUE)
   readCountsFiltered <- estimateCorrection(readCountsFiltered)
