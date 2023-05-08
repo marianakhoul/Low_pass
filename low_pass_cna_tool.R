@@ -261,7 +261,7 @@ exportFiles <- function(QDNAseqObj, name) {
              file=names$copynum,
              format="igv")
   QDNAseqObj$copyNumbersCalled@phenoData@data$name <- names$seg
-  exportBins(QDNAseqObj$copyNumbersCalled, format = "seg", 
+  exportBins(QDNAseqObj$copyNumbersCalled, format = "seg", file=names$seg,
              type="segments")
   names$seg <- sprintf("%s.SEG.seg", name)
   return(names)
