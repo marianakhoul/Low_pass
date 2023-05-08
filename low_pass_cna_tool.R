@@ -271,7 +271,7 @@ exportFiles <- function(QDNAseqObj, name) {
 
 plotAll <- function(QDNAseqObj, title) {
   # save a few plots as pngs
-  png(filename = sprintf("Isobar_plot_%s.png", title), width = 720)
+  png(filename = sprintf("Isobar_plot_%s.png", title), width = 720, type="cairo")
   isobarPlot(QDNAseqObj$readCountsFiltered)
   dev.off()
   png(filename = sprintf("Noise_plot_%s.png", title))
